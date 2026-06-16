@@ -25,6 +25,7 @@ package com.wepay.kafka.connect.bigquery.convert;
 
 import com.google.cloud.bigquery.FieldList;
 import com.google.cloud.bigquery.LegacySQLTypeName;
+import com.google.cloud.bigquery.PolicyTags;
 import com.wepay.kafka.connect.bigquery.config.BigQuerySinkConfig.DecimalHandlingMode;
 import com.wepay.kafka.connect.bigquery.convert.logicaltype.LogicalConverterRegistry;
 import com.wepay.kafka.connect.bigquery.convert.logicaltype.LogicalTypeConverter;
@@ -81,6 +82,7 @@ public class BigQuerySchemaConverter implements SchemaConverter<com.google.cloud
 
   private final boolean allFieldsNullable;
   private final boolean sanitizeFieldNames;
+  private final String policyTag;
 
   /**
    * Creates a schema converter.
@@ -88,20 +90,22 @@ public class BigQuerySchemaConverter implements SchemaConverter<com.google.cloud
    * @param allFieldsNullable if {@code true} all fields are nullable.
    * @param sanitizeFieldNames if {@code true} field names are sanitized before use.
    */
-  public BigQuerySchemaConverter(boolean allFieldsNullable, boolean sanitizeFieldNames) {
+  public BigQuerySchemaConverter(boolean allFieldsNullable, boolean sanitizeFieldNames, String policyTag) {
     this.allFieldsNullable = allFieldsNullable;
     this.sanitizeFieldNames = sanitizeFieldNames;
+    this.policyTag = policyTag;
   }
 
   /**
-   * @deprecated Use {@link #BigQuerySchemaConverter(boolean, boolean)} decimalHandling and variable scale handling are handled in config processing.
+   * @deprecated Use {@link #BigQuerySchemaConverter(boolean, boolean, String)} decimalHandling and variable scale handling are handled in config processing.
    */
   @Deprecated
   public BigQuerySchemaConverter(boolean allFieldsNullable,
                                  boolean sanitizeFieldNames,
+                                 String policyTag,
                                  DecimalHandlingMode decimalHandlingMode,
                                  DecimalHandlingMode variableScaleDecimalHandlingMode) {
-    this(allFieldsNullable, sanitizeFieldNames);
+    this(allFieldsNullable, sanitizeFieldNames, policyTag);
   }
 
   /**
@@ -199,6 +203,11 @@ public class BigQuerySchemaConverter implements SchemaConverter<com.google.cloud
       setNullability(kafkaConnectSchema, res);
       if (kafkaConnectSchema.doc() != null) {
         res.setDescription(kafkaConnectSchema.doc());
+      }
+      if (kafkaConnectSchema.parameters() != null && kafkaConnectSchema.parameters().containsKey("PII")) {
+        ArrayList<String> policyNames = new ArrayList<>();
+        policyNames.add(policyTag);
+        res.setPolicyTags(PolicyTags.newBuilder().setNames(policyNames).build());
       }
       return res;
     });

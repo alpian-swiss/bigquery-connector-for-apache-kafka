@@ -54,6 +54,7 @@ import java.util.stream.Stream;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.Config;
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.config.ConfigDef.Type;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.config.ConfigValue;
 import org.apache.kafka.common.config.types.Password;
@@ -109,6 +110,8 @@ public class BigQuerySinkConfig extends AbstractConfig {
   public static final Boolean SANITIZE_FIELD_NAME_DEFAULT = false;
   public static final String TRACK_PUT_ATTEMPTS_CONFIG = "trackPutAttempts";
   public static final Boolean TRACK_PUT_ATTEMPTS_DEFAULT = false;
+  public static final String POLICY_TAG_CONFIG = "policyTag";
+  public static final String POLICY_TAG_DEFAULT = "";
   public static final String KAFKA_KEY_FIELD_NAME_CONFIG = "kafkaKeyFieldName";
   public static final String KAFKA_KEY_FIELD_NAME_DEFAULT = null;
   public static final String KAFKA_DATA_FIELD_NAME_CONFIG = "kafkaDataFieldName";
@@ -351,6 +354,7 @@ public class BigQuerySinkConfig extends AbstractConfig {
   private static final ConfigDef.Type SANITIZE_FIELD_NAME_TYPE = ConfigDef.Type.BOOLEAN;
   private static final ConfigDef.Importance SANITIZE_FIELD_NAME_IMPORTANCE =
       ConfigDef.Importance.MEDIUM;
+
   private static final String SANITIZE_FIELD_NAME_DOC =
       "Whether to automatically sanitize field names before using them as field names in big query. "
           + "Big query specifies that field name can only contain letters, numbers, and "
@@ -368,6 +372,11 @@ public class BigQuerySinkConfig extends AbstractConfig {
           + "attempt. Useful for downstream deduplication of raw CDC tables. Has no effect if "
           + "kafkaDataFieldName is not configured. Enabling this on an existing table requires "
           + "allowNewBigQueryFields=true. Default false (disabled).";
+  private static final ConfigDef.Type POLICY_TAG_TYPE = Type.STRING;
+  private static final ConfigDef.Importance POLICY_TAG_IMPORTANCE =
+      ConfigDef.Importance.MEDIUM;
+  private static final String POLICY_TAG_DOC =
+      "";
   private static final ConfigDef.Type KAFKA_KEY_FIELD_NAME_TYPE = ConfigDef.Type.STRING;
   private static final ConfigDef.Validator KAFKA_KEY_FIELD_NAME_VALIDATOR = new ConfigDef.NonEmptyString();
   private static final ConfigDef.Importance KAFKA_KEY_FIELD_NAME_IMPORTANCE = ConfigDef.Importance.LOW;
@@ -807,6 +816,12 @@ public class BigQuerySinkConfig extends AbstractConfig {
                     TRACK_PUT_ATTEMPTS_IMPORTANCE,
                     TRACK_PUT_ATTEMPTS_DOC
             ).define(
+                    POLICY_TAG_CONFIG,
+                    POLICY_TAG_TYPE,
+                    POLICY_TAG_DEFAULT,
+                    POLICY_TAG_IMPORTANCE,
+                    POLICY_TAG_DOC
+            ).define(
                     KAFKA_KEY_FIELD_NAME_CONFIG,
                     KAFKA_KEY_FIELD_NAME_TYPE,
                     KAFKA_KEY_FIELD_NAME_DEFAULT,
@@ -1205,7 +1220,8 @@ public class BigQuerySinkConfig extends AbstractConfig {
   public SchemaConverter<Schema> getSchemaConverter() { /// Update it later
     return new BigQuerySchemaConverter(
         getBoolean(ALL_BQ_FIELDS_NULLABLE_CONFIG),
-        getBoolean(SANITIZE_FIELD_NAME_CONFIG));
+        getBoolean(SANITIZE_FIELD_NAME_CONFIG),
+    getString(POLICY_TAG_CONFIG));
   }
 
   /**

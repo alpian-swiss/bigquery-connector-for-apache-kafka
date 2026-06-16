@@ -694,7 +694,7 @@ public class SchemaManagerTest {
 
   @Test
   public void testFieldNamesSanitizedNoExistingSchema() {
-    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(false, true);
+    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(false, true,"");
 
     Schema kafkaSchema = SchemaBuilder.struct()
         .field("f 1", Schema.BOOLEAN_SCHEMA)
@@ -713,7 +713,7 @@ public class SchemaManagerTest {
 
   @Test
   public void testFieldNameSanitizedNewFields() {
-    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(false, true);
+    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(false, true,"");
     com.google.cloud.bigquery.Schema existingSchema = com.google.cloud.bigquery.Schema.of(
         Field.newBuilder("f1", LegacySQLTypeName.BOOLEAN).setMode(Mode.REQUIRED).build()
     );
@@ -736,7 +736,7 @@ public class SchemaManagerTest {
 
   @Test
   public void testFieldNamesSanitizedUnionizedFields() {
-    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(false, true);
+    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(false, true,"");
     com.google.cloud.bigquery.Schema existingSchema = com.google.cloud.bigquery.Schema.of(
         Field.newBuilder("f1", LegacySQLTypeName.BOOLEAN).setMode(Mode.REQUIRED).build()
     );
@@ -758,7 +758,7 @@ public class SchemaManagerTest {
 
   @Test
   public void testFieldNamesSanitizedFieldRelaxation() {
-    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(false, true);
+    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(false, true,"");
     com.google.cloud.bigquery.Schema existingSchema = com.google.cloud.bigquery.Schema.of(
         Field.newBuilder("f_1", LegacySQLTypeName.BOOLEAN).setMode(Mode.REQUIRED).build()
     );
@@ -1039,7 +1039,7 @@ public class SchemaManagerTest {
         .build();
 
     List<SinkRecord> incomingSinkRecords = Collections.nCopies(2, recordWithValueSchema(schemaWithInvalidFieldNames));
-    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(true, true);
+    BigQuerySchemaConverter converter = new BigQuerySchemaConverter(true, true,"");
 
     SchemaManager schemaManager = createSchemaManager(false, false, false, true, converter);
     schemaManager.createTable(tableId, incomingSinkRecords);

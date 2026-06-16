@@ -52,18 +52,22 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 public class BigQuerySchemaConverterTest {
 
   private boolean allFieldsNullable;
   private boolean sanitizeFieldNames;
+  private String policyTag;
 
   @BeforeEach
   void resetValues() {
     allFieldsNullable = false;
     sanitizeFieldNames = false;
+    policyTag = "";
     DebeziumLogicalConverters.remove();
     KafkaLogicalConverters.remove();
   }
@@ -90,7 +94,7 @@ public class BigQuerySchemaConverterTest {
   private BigQuerySchemaConverter createConverter(BigQuerySinkConfig config) {
     DebeziumLogicalConverters.initialize(config);
     KafkaLogicalConverters.initialize(config);
-    return new BigQuerySchemaConverter(allFieldsNullable, sanitizeFieldNames);
+    return new BigQuerySchemaConverter(allFieldsNullable, sanitizeFieldNames,policyTag);
   }
 
   @Test
