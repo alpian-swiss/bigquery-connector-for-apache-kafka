@@ -117,6 +117,56 @@ Expect the same next time: a large-looking diff, a handful of formatting-only
 conflicts, and no semantic work — provided the patch stays additive and
 Spotless-formatted.
 
+## Cutting a new jar on the same upstream base
+
+Use this when you have changed **our** code (or the pipeline) but upstream has
+not released anything new. There is no rebase and no `main` sync — you are only
+incrementing the fork's own revision: `2.15.0-alpian.1` → `2.15.0-alpian.2`.
+
+**Just a jar to test with, nothing published.** Two commands, no version bump:
+
+```bash
+mvn -ntp -P ci --batch-mode clean install -DskipITs
+mvn -ntp -P ci --batch-mode -f kcbq-connector \
+  clean package assembly:single@release-artifacts -DskipTests
+```
+
+Artifacts land in `kcbq-connector/target/` — the `.zip`/`.tar` for a Connect
+worker, `kcbq-connector-<version>.jar` for the bare jar.
+
+**A released, shareable jar.** Bump the suffix, then tag:
+
+```bash
+# 1. make your change on Alpian and commit it
+
+# 2. bump the fork revision -- the upstream part stays 2.15.0
+mvn versions:set -DnewVersion=2.15.0-alpian.2 -DgenerateBackupPoms=false
+git commit -am "Set fork version 2.15.0-alpian.2"
+
+# 3. verify locally (same three checks as the port runbook, step 4)
+mvn -ntp -P ci --batch-mode clean install -DskipITs
+mvn -ntp -P ci --batch-mode -f kcbq-connector \
+  clean package assembly:single@release-artifacts -DskipTests
+VER=2.15.0-alpian.2
+unzip -l kcbq-connector/target/bigquery-connector-for-apache-kafka-$VER.zip \
+  | grep "kcbq-connector-$VER.jar" || echo "BROKEN: connector jar missing"
+
+# 4. push -- a plain fast-forward, no force needed
+git push origin Alpian
+
+# 5. tag once CI is green
+git tag -a v2.15.0-alpian.2 -m "Alpian fork release 2.15.0-alpian.2"
+git push origin v2.15.0-alpian.2
+```
+
+Then collect it exactly as in step 8 of the port runbook.
+
+> **You must bump the suffix — never re-tag or re-publish an existing version.**
+> `v2.15.0-alpian.1` is already a GitHub Release and already sits in GitHub
+> Packages. Maven coordinates are meant to be immutable, the registry rejects
+> re-publishing a version that exists, and a worker that already pulled
+> `2.15.0-alpian.1` has no way to tell that its contents changed. Increment `N`.
+
 ## Runbook: porting to a new upstream release
 
 Worked example: **upstream releases `v2.16.0`, we ship `2.16.0-alpian.1`.**
@@ -285,6 +335,19 @@ That run additionally:
 1. creates a **GitHub Release** on `alpian-swiss` with both archives attached,
 2. runs the `publish` job, deploying the Maven artifacts to **GitHub Packages**.
 
+> **The `publish` job needs an org secret that is not granted yet.** It
+> authenticates as `ALP-ACC-SVC-Github` using `ALP_ACC_SVC_CI_TOKEN`, matching
+> Alpian's other pipelines — but
+> `repos/.../actions/organization-secrets` currently reports `total_count: 0`,
+> so the password resolves to an empty string and the deploy will fail with 401.
+> An org admin must add this repository under **Org settings → Secrets and
+> variables → Actions → `ALP_ACC_SVC_CI_TOKEN` → Repository access**.
+>
+> The GitHub Release step is unaffected — it uses the built-in `GITHUB_TOKEN`.
+> If you need Packages working before that grant lands, switch the two env lines
+> back to `${{ github.actor }}` / `${{ secrets.GITHUB_TOKEN }}`, which is the
+> combination that published `v2.15.0-alpian.1`.
+
 > **Once a release tag is pushed, stop rewriting the commits it points at.**
 > Until this point `Alpian` is force-pushed freely. A tag pins a specific commit
 > and that commit is now a published artifact: rewriting it strands the tag on
@@ -321,18 +384,39 @@ the marker, and it is how you prove a worker is running our build and not
 upstream's.
 
 **As a Maven dependency (GitHub Packages).** Only needed if something compiles
-against the connector. Add the repository and a PAT with `read:packages` to
-`~/.m2/settings.xml`:
+against the connector.
 
-```xml
-<servers>
-  <server>
-    <id>github-alpian</id>
-    <username>YOUR_GITHUB_USERNAME</username>
-    <password>YOUR_PAT_WITH_read:packages</password>
-  </server>
-</servers>
+> **Authentication is always required, even though this repo is public.**
+> Unlike most registries, `maven.pkg.github.com` has no anonymous read. Verified:
+> an unauthenticated fetch of a published `.pom` returns **401**, the same fetch
+> with a token returns **200**. Every consumer — CI job or laptop — needs a
+> credential. There is no "it's public, just add the repository" path.
+
+Because of that, use the **org service account** that Alpian's other pipelines
+already carry, rather than a personal PAT. In CI that means the same pair the
+Gradle jobs use:
+
+```yaml
+env:
+  MAVEN_USERNAME: ALP-ACC-SVC-Github
+  MAVEN_PASSWORD: ${{ secrets.ALP_ACC_SVC_CI_TOKEN }}
 ```
+
+with `setup-java` pointed at those variable *names* — it writes a
+`settings.xml` holding `${env.MAVEN_USERNAME}` / `${env.MAVEN_PASSWORD}`
+placeholders that Maven interpolates at resolve time:
+
+```yaml
+- uses: actions/setup-java@v6
+  with:
+    distribution: temurin
+    java-version: 17
+    server-id: github-alpian
+    server-username: MAVEN_USERNAME
+    server-password: MAVEN_PASSWORD
+```
+
+Then declare the repository and the dependency:
 
 ```xml
 <repository>
@@ -346,6 +430,27 @@ against the connector. Add the repository and a PAT with `read:packages` to
   <version>2.16.0-alpian.1</version>
 </dependency>
 ```
+
+The `<server>` id must equal the `<repository>` id, or Maven resolves anonymously
+and gets the 401.
+
+For a **developer machine**, put the same server block in `~/.m2/settings.xml`
+using the service-account credential or a personal PAT with `read:packages` —
+never in a `settings.xml` inside a repository, where it would get committed:
+
+```xml
+<servers>
+  <server>
+    <id>github-alpian</id>
+    <username>ALP-ACC-SVC-Github</username>
+    <password>${env.PACKAGES_TOKEN}</password>
+  </server>
+</servers>
+```
+
+`${env.PACKAGES_TOKEN}` keeps the token out of the file itself — export it from
+your shell or a secret manager. Prefer the service account over a personal PAT so
+access does not follow one individual's account.
 
 **Verified working** as of `v2.15.0-alpian.1`. There was a documented concern
 that GitHub Packages requires the groupId to correspond to the repository owner,
