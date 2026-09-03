@@ -51,7 +51,7 @@ git fetch upstream
 
 ## Our patches
 
-Based on **`v2.15.0`**; latest release **`v2.15.0-alpian.2`**.
+Based on **`v2.15.0`**; latest release **`v2.15.0-alpian.3`**.
 
 | Change | What it covers |
 | --- | --- |
