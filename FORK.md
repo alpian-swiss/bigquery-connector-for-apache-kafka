@@ -335,18 +335,12 @@ That run additionally:
 1. creates a **GitHub Release** on `alpian-swiss` with both archives attached,
 2. runs the `publish` job, deploying the Maven artifacts to **GitHub Packages**.
 
-> **The `publish` job needs an org secret that is not granted yet.** It
-> authenticates as `ALP-ACC-SVC-Github` using `ALP_ACC_SVC_CI_TOKEN`, matching
-> Alpian's other pipelines — but
-> `repos/.../actions/organization-secrets` currently reports `total_count: 0`,
-> so the password resolves to an empty string and the deploy will fail with 401.
-> An org admin must add this repository under **Org settings → Secrets and
-> variables → Actions → `ALP_ACC_SVC_CI_TOKEN` → Repository access**.
->
-> The GitHub Release step is unaffected — it uses the built-in `GITHUB_TOKEN`.
-> If you need Packages working before that grant lands, switch the two env lines
-> back to `${{ github.actor }}` / `${{ secrets.GITHUB_TOKEN }}`, which is the
-> combination that published `v2.15.0-alpian.1`.
+Both steps authenticate with the built-in `GITHUB_TOKEN`. **No org secret is
+needed to publish** — that token is already scoped to this repository's own
+package registry, which is all a publish requires. This mirrors the
+`GITHUB_ACTOR` / `GITHUB_TOKEN` credentials block in Alpian's Gradle
+`maven-publish` config, and it is the combination that published
+`v2.15.0-alpian.1`.
 
 > **Once a release tag is pushed, stop rewriting the commits it points at.**
 > Until this point `Alpian` is force-pushed freely. A tag pins a specific commit
@@ -392,9 +386,16 @@ against the connector.
 > with a token returns **200**. Every consumer — CI job or laptop — needs a
 > credential. There is no "it's public, just add the repository" path.
 
-Because of that, use the **org service account** that Alpian's other pipelines
-already carry, rather than a personal PAT. In CI that means the same pair the
-Gradle jobs use:
+Note the asymmetry, because it is easy to get backwards:
+
+| Direction | Credential | Why |
+| --- | --- | --- |
+| **Publishing** (this repo → its own registry) | built-in `GITHUB_TOKEN` | already scoped to this repository's packages; no secret to manage |
+| **Consuming** (another repo → this registry) | org service account | a repo's own `GITHUB_TOKEN` cannot read *another* repository's packages |
+
+So for consumers use the **org service account** that Alpian's other pipelines
+already carry — the `PACKAGES_TOKEN` in those workflows — rather than a personal
+PAT:
 
 ```yaml
 env:

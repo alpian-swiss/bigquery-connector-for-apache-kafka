@@ -153,15 +153,21 @@ jobs:
 
       # setup-java above writes a settings.xml whose <server id="github"> holds
       # ${env.MAVEN_USERNAME} / ${env.MAVEN_PASSWORD} placeholders; Maven
-      # interpolates them from the environment below at deploy time. Same idea
-      # as PACKAGES_TOKEN/GITHUB_USERNAME in Alpian's Gradle pipelines.
+      # interpolates them from the environment below at deploy time. This is the
+      # Maven equivalent of the GITHUB_ACTOR / GITHUB_TOKEN credentials block in
+      # Alpian's Gradle maven-publish config.
+      #
+      # The built-in GITHUB_TOKEN is the right credential here: it is already
+      # scoped to this repository's own package registry, which is all a publish
+      # needs. No org secret required. (An org service-account PAT is only
+      # needed to *read* another repository's packages -- see FORK.md.)
       #
       # altDeploymentRepository keeps distributionManagement out of the pom, so
       # rebasing onto a new upstream tag never conflicts on this setting.
       - name: Deploy (Maven)
         env:
-          MAVEN_USERNAME: ALP-ACC-SVC-Github
-          MAVEN_PASSWORD: ${{ secrets.ALP_ACC_SVC_CI_TOKEN }}
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mvn -ntp -P ci --batch-mode deploy -DskipTests -DskipITs \
             -DaltDeploymentRepository=github::https://maven.pkg.github.com/${{ github.repository }}
