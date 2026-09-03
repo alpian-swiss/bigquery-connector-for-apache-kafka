@@ -59,6 +59,57 @@ git fetch upstream
 Keep the patch count low and each commit self-contained — every one of them has
 to be replayed on each upstream rebase.
 
+## Always base the patches on a release tag
+
+Our patch sits on the `v2.14.0` tag commit (`43e3b36a`) exactly — not on some
+mid-development commit of upstream `main`. Verify with:
+
+```bash
+test "$(git merge-base upstream/main Alpian)" = "$(git rev-parse v2.14.0^{commit})" \
+  && echo "based on the v2.14.0 tag"
+```
+
+Keep it that way. Basing on a tag means the fork always corresponds to a
+shipped, tested upstream release, and `git rebase --onto <next-tag> <this-tag>`
+is a single well-defined operation.
+
+## Porting to v2.15.0 (released 2026-09, upstream)
+
+Measured, not guessed — a trial `git rebase --onto v2.15.0 v2.14.0` gives:
+
+| File | Conflict hunks |
+| --- | --- |
+| `BigQuerySinkConfig.java` | 2 |
+| `BigQuerySchemaConverter.java` | 3 |
+| `SchemaManagerTest.java` | 4 |
+| `BigQuerySchemaConverterTest.java` | 1 |
+
+The raw `v2.14.0..v2.15.0` diff touches those four files by ~2400 lines, which
+looks alarming, but **every one of the 10 conflicts is a pure formatting
+collision, not a semantic one**. Upstream added the Spotless Google-Java-Format
+plugin in v2.15.0 (`d58ae257`) and reformatted the codebase; our patch edits the
+same lines in the old formatting. The API our patch hooks into is unchanged —
+`BigQuerySchemaConverter(boolean, boolean)` and both its fields still exist in
+v2.15.0. Resolving means taking upstream's formatting and re-applying our small
+addition on top.
+
+Two things make every future port dramatically cheaper:
+
+1. **Run Spotless on the patch.** v2.15.0 runs `spotless:check` as part of the
+   build, so an unformatted patch fails CI outright. After resolving, run
+   `mvn spotless:apply` and commit. Once our patch is in upstream's own format,
+   formatting conflicts stop happening.
+
+2. **Make the patch additive — overload, don't modify.** Today it *changes*
+   `BigQuerySchemaConverter(boolean, boolean)` into
+   `(boolean, boolean, String)`, which forces edits to every existing call site.
+   That is what drags the two test files into the patch at all: all five of their
+   call sites use the plain 2-arg form. Keeping the 2-arg constructor as an
+   overload that delegates with `policyTag = ""` would drop **5 of the 10
+   conflict hunks and 2 of the 4 files** from the patch permanently, and leave
+   the deprecated 4-arg constructor untouched too. Worth restructuring before
+   the next port rather than paying for it on every release.
+
 ## Rebasing onto a new upstream release
 
 We **rebase**, never merge. That keeps the patch series legible and replayable.
@@ -72,8 +123,10 @@ git push origin main
 
 # 2. Replay our patches on top of the new upstream release tag
 git checkout Alpian
-git rebase --onto v2.15.0 <previous-upstream-base> Alpian
-#   ...resolve conflicts, then:
+git rebase --onto v2.15.0 v2.14.0 Alpian
+#   ...resolve conflicts, then re-format to upstream's Spotless style
+#   (v2.15.0+ runs spotless:check in the build and will fail without this):
+mvn spotless:apply
 mvn -ntp -P ci clean install -DskipITs   # must be green locally
 
 # 3. Re-apply the version marker and publish
@@ -142,8 +195,16 @@ git tag v2.14.0-alpian.1
 git push origin v2.14.0-alpian.1
 ```
 
-That attaches both archives to a GitHub Release and deploys the Maven artifacts
-to GitHub Packages under `com.wepay.kcbq`.
+That attaches both archives to a GitHub Release (verified path) and runs the
+`publish` job, which deploys the Maven artifacts to GitHub Packages.
+
+> **The `publish` job is unverified.** It has never run. GitHub Packages is
+> documented to expect the groupId to correspond to the repository owner, and
+> ours is upstream's `com.wepay.kcbq`, so the deploy may be rejected. Treat the
+> first tagged build as the test. If Packages refuses the coordinates, either
+> drop the `publish` job and consume the Release archive directly — which is the
+> normal way to ship a Kafka Connect plugin anyway — or relocate the groupId,
+> which means a larger and more conflict-prone pom patch.
 
 ## Upstream workflows are disabled on this fork
 
@@ -157,9 +218,13 @@ which survives rebases without a code change:
 | `build_site.yml` | disabled |
 | `create_release.yml` | disabled |
 | `create_release_pr.yml` | disabled |
-| `prs_and_commits.yml` | left active — only triggers on `main`, which we never commit to |
+| `prs_and_commits.yml` | left active — harmless; see below |
 
 Nothing has ever run in Actions on this fork, so none of them has fired yet.
+
+`prs_and_commits.yml` triggers on pushes to `main`, so step 1 of the rebase
+procedure above (`git push origin main`) does fire it. That is benign — it just
+builds upstream's own code — but it is not "never triggered".
 
 If a rebase or an upstream sync appears to re-enable any of them, disable them
 again. `nightly.yml`, `manual.yml` and `release_pr_workflow.yml` are not
