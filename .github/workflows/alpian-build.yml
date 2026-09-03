@@ -1,0 +1,162 @@
+#
+# Copyright 2024 Copyright 2022 Aiven Oy and
+# bigquery-connector-for-apache-kafka project contributors
+#
+# This software contains code derived from the Confluent BigQuery
+# Kafka Connector, Copyright Confluent, Inc, which in turn
+# contains code derived from the WePay BigQuery Kafka Connector,
+# Copyright WePay, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Alpian fork build pipeline.
+#
+# This file is NOT part of the upstream Aiven-Open project. It exists only on
+# the `Alpian` patch branch and builds the fork's distributable artifacts.
+#
+# Upstream's own release workflows (create_release*.yml, release_pr_workflow.yml,
+# build_site.yml) are disabled at the repository level on this fork and must
+# stay that way -- see FORK.md.
+name: Alpian build
+
+on:
+  push:
+    branches: [ Alpian ]
+    tags: [ 'v*-alpian*' ]
+  pull_request:
+    branches: [ Alpian ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: alpian-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+
+      - name: Resolve project version
+        id: version
+        run: |
+          VERSION=$(mvn -ntp -q --batch-mode \
+            org.apache.maven.plugins:maven-help-plugin:3.5.1:evaluate \
+            -Dexpression=project.version -DforceStdout)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building version $VERSION"
+
+      # Runs checkstyle, RAT and the unit tests, and installs the modules into
+      # the local repo so the assembly step below can resolve kcbq-api.
+      #
+      # -DskipITs is required: `install` runs *past* the `verify` phase, which
+      # triggers the failsafe `integration` group. Those tests need live GCP
+      # credentials (see manual.yml) and fail hard without them.
+      - name: Build, test and install (Maven)
+        run: mvn -ntp -P ci --batch-mode clean install -DskipITs
+
+      # `assembly:single` is bound to no lifecycle phase here, so `package`
+      # alone produces no archives, and it cannot be added to the reactor
+      # command either (it would fail on the parent: "No assembly descriptors
+      # found"). It must also run in the SAME invocation that builds the jar --
+      # standalone, the project artifact is not attached and the connector's
+      # own jar is silently omitted from the archives, leaving a plugin that
+      # loads but does nothing. Hence this separate connector-only invocation.
+      - name: Assemble distribution archives (Maven)
+        run: |
+          mvn -ntp -P ci --batch-mode -f kcbq-connector \
+            clean package assembly:single@release-artifacts -DskipTests
+
+      - name: Verify archives contain the connector jar
+        run: |
+          ZIP=$(ls kcbq-connector/target/bigquery-connector-for-apache-kafka-*.zip)
+          unzip -l "$ZIP" | grep -q "kcbq-connector-${{ steps.version.outputs.version }}.jar" \
+            || { echo "::error::connector jar missing from $ZIP"; exit 1; }
+          echo "OK: $ZIP contains the connector jar"
+
+      - name: Upload connector distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: bigquery-connector-for-apache-kafka-${{ steps.version.outputs.version }}
+          path: |
+            kcbq-connector/target/bigquery-connector-for-apache-kafka-*.tar
+            kcbq-connector/target/bigquery-connector-for-apache-kafka-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test reports on failure
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: test-results
+          path: |
+            **/target/*-reports/**
+          retention-days: 7
+
+      - name: Attach distribution to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Alpian fork build of bigquery-connector-for-apache-kafka ${{ steps.version.outputs.version }}. Custom patches: see FORK.md." \
+            kcbq-connector/target/bigquery-connector-for-apache-kafka-*.tar \
+            kcbq-connector/target/bigquery-connector-for-apache-kafka-*.zip
+
+  publish:
+    name: Publish to GitHub Packages
+    needs: build
+    # Only tags publish immutable Maven coordinates. Branch pushes stay as
+    # build artifacts so we never overwrite a released version.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: maven
+          server-id: github
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+
+      # altDeploymentRepository keeps distributionManagement out of the pom, so
+      # rebasing onto a new upstream tag never conflicts on this setting.
+      - name: Deploy (Maven)
+        env:
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mvn -ntp -P ci --batch-mode deploy -DskipTests -DskipITs \
+            -DaltDeploymentRepository=github::https://maven.pkg.github.com/${{ github.repository }}
