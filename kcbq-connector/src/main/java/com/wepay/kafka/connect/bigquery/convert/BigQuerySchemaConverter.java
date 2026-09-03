@@ -25,12 +25,14 @@ package com.wepay.kafka.connect.bigquery.convert;
 
 import com.google.cloud.bigquery.FieldList;
 import com.google.cloud.bigquery.LegacySQLTypeName;
+import com.google.cloud.bigquery.PolicyTags;
 import com.wepay.kafka.connect.bigquery.config.BigQuerySinkConfig.DecimalHandlingMode;
 import com.wepay.kafka.connect.bigquery.convert.logicaltype.LogicalConverterRegistry;
 import com.wepay.kafka.connect.bigquery.convert.logicaltype.LogicalTypeConverter;
 import com.wepay.kafka.connect.bigquery.exception.ConversionConnectException;
 import com.wepay.kafka.connect.bigquery.utils.FieldNameSanitizer;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,18 +68,40 @@ public class BigQuerySchemaConverter implements SchemaConverter<com.google.cloud
     PRIMITIVE_TYPE_MAP.put(Schema.Type.BYTES, LegacySQLTypeName.BYTES);
   }
 
+  /**
+   * Kafka Connect schema parameter that marks a field as personally identifiable information. Any
+   * field carrying this parameter is tagged with the configured BigQuery policy tag.
+   */
+  public static final String PII_SCHEMA_PARAMETER = "PII";
+
   private final boolean allFieldsNullable;
   private final boolean sanitizeFieldNames;
+  private final String policyTag;
+
+  /**
+   * Creates a schema converter that does not apply BigQuery policy tags.
+   *
+   * @param allFieldsNullable if {@code true} all fields are nullable.
+   * @param sanitizeFieldNames if {@code true} field names are sanitized before use.
+   */
+  public BigQuerySchemaConverter(boolean allFieldsNullable, boolean sanitizeFieldNames) {
+    this(allFieldsNullable, sanitizeFieldNames, "");
+  }
 
   /**
    * Creates a schema converter.
    *
    * @param allFieldsNullable if {@code true} all fields are nullable.
    * @param sanitizeFieldNames if {@code true} field names are sanitized before use.
+   * @param policyTag the BigQuery policy tag to attach to fields whose Kafka Connect schema carries
+   *     the {@value #PII_SCHEMA_PARAMETER} parameter. Empty or {@code null} disables policy
+   *     tagging.
    */
-  public BigQuerySchemaConverter(boolean allFieldsNullable, boolean sanitizeFieldNames) {
+  public BigQuerySchemaConverter(
+      boolean allFieldsNullable, boolean sanitizeFieldNames, String policyTag) {
     this.allFieldsNullable = allFieldsNullable;
     this.sanitizeFieldNames = sanitizeFieldNames;
+    this.policyTag = policyTag;
   }
 
   /**
@@ -190,8 +214,25 @@ public class BigQuerySchemaConverter implements SchemaConverter<com.google.cloud
           if (kafkaConnectSchema.doc() != null) {
             res.setDescription(kafkaConnectSchema.doc());
           }
+          setPolicyTags(kafkaConnectSchema, res);
           return res;
         });
+  }
+
+  /**
+   * Attaches the configured BigQuery policy tag to fields marked as PII. Does nothing when no
+   * policy tag is configured, so that converters built without one behave exactly as before.
+   */
+  private void setPolicyTags(
+      Schema kafkaConnectSchema, com.google.cloud.bigquery.Field.Builder fieldBuilder) {
+    if (policyTag == null || policyTag.isEmpty()) {
+      return;
+    }
+    Map<String, String> parameters = kafkaConnectSchema.parameters();
+    if (parameters != null && parameters.containsKey(PII_SCHEMA_PARAMETER)) {
+      fieldBuilder.setPolicyTags(
+          PolicyTags.newBuilder().setNames(Collections.singletonList(policyTag)).build());
+    }
   }
 
   private void setNullability(

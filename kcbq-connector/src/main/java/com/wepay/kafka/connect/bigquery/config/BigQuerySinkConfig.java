@@ -121,6 +121,8 @@ public class BigQuerySinkConfig extends AbstractConfig {
   public static final Boolean SANITIZE_FIELD_NAME_DEFAULT = false;
   public static final String TRACK_PUT_ATTEMPTS_CONFIG = "trackPutAttempts";
   public static final Boolean TRACK_PUT_ATTEMPTS_DEFAULT = false;
+  public static final String POLICY_TAG_CONFIG = "policyTag";
+  public static final String POLICY_TAG_DEFAULT = "";
   public static final String KAFKA_KEY_FIELD_NAME_CONFIG = "kafkaKeyFieldName";
   public static final String KAFKA_KEY_FIELD_NAME_DEFAULT = null;
   public static final String KAFKA_DATA_FIELD_NAME_CONFIG = "kafkaDataFieldName";
@@ -419,6 +421,15 @@ public class BigQuerySinkConfig extends AbstractConfig {
           + "attempt. Useful for downstream deduplication of raw CDC tables. Has no effect if "
           + "kafkaDataFieldName is not configured. Enabling this on an existing table requires "
           + "allowNewBigQueryFields=true. Default false (disabled).";
+  private static final ConfigDef.Type POLICY_TAG_TYPE = ConfigDef.Type.STRING;
+  private static final ConfigDef.Importance POLICY_TAG_IMPORTANCE = ConfigDef.Importance.MEDIUM;
+  private static final String POLICY_TAG_DOC =
+      "The fully-qualified name of the BigQuery policy tag to attach to fields whose Kafka Connect "
+          + "schema carries a 'PII' parameter, in the form "
+          + "'projects/<project>/locations/<location>/taxonomies/<taxonomy>/policyTags/<tag>'. "
+          + "Used to apply column-level access control to personally identifiable information. "
+          + "Requires allowNewBigQueryFields=true to apply to an existing table. Empty by default "
+          + "(no policy tagging).";
   private static final ConfigDef.Type KAFKA_KEY_FIELD_NAME_TYPE = ConfigDef.Type.STRING;
   private static final ConfigDef.Importance KAFKA_KEY_FIELD_NAME_IMPORTANCE =
       ConfigDef.Importance.LOW;
@@ -952,6 +963,12 @@ public class BigQuerySinkConfig extends AbstractConfig {
             TRACK_PUT_ATTEMPTS_IMPORTANCE,
             TRACK_PUT_ATTEMPTS_DOC)
         .define(
+            POLICY_TAG_CONFIG,
+            POLICY_TAG_TYPE,
+            POLICY_TAG_DEFAULT,
+            POLICY_TAG_IMPORTANCE,
+            POLICY_TAG_DOC)
+        .define(
             KAFKA_KEY_FIELD_NAME_CONFIG,
             KAFKA_KEY_FIELD_NAME_TYPE,
             KAFKA_KEY_FIELD_NAME_DEFAULT,
@@ -1391,7 +1408,9 @@ public class BigQuerySinkConfig extends AbstractConfig {
    */
   public SchemaConverter<Schema> getSchemaConverter() { // / Update it later
     return new BigQuerySchemaConverter(
-        getBoolean(ALL_BQ_FIELDS_NULLABLE_CONFIG), getBoolean(SANITIZE_FIELD_NAME_CONFIG));
+        getBoolean(ALL_BQ_FIELDS_NULLABLE_CONFIG),
+        getBoolean(SANITIZE_FIELD_NAME_CONFIG),
+        getString(POLICY_TAG_CONFIG));
   }
 
   /**
