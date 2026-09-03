@@ -62,6 +62,16 @@ jobs:
           java-version: 17
           cache: maven
 
+      # setup-java registers a problem matcher with owner "java" whose pattern
+      # is ^Exception in thread "(.*)" (.*): (.*)$ -- it turns any such line
+      # into an error annotation. Several unit tests deliberately exercise
+      # write-failure paths and let exceptions escape on background threads, so
+      # a run with all 459 tests passing reported "8 errors". Dropping just
+      # that matcher removes the false alarms; the "javac" and "maven-javac"
+      # matchers stay registered, so real compile errors are still annotated.
+      - name: Drop the uncaught-exception problem matcher
+        run: echo "::remove-matcher owner=java::"
+
       - name: Resolve project version
         id: version
         run: |
