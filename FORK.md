@@ -51,12 +51,12 @@ git fetch upstream
 
 ## Our patches
 
-Currently based on **`v2.15.0`**.
+Based on **`v2.15.0`**; latest release **`v2.15.0-alpian.1`**.
 
-| Commit | Change |
+| Change | What it covers |
 | --- | --- |
-| `Add policyTag config…` | Adds a `policyTag` connector config. When a Kafka Connect field schema carries a `PII` parameter, the generated BigQuery field gets that policy tag attached, enabling column-level access control. |
-| `Add fork build pipeline…` | The version marker (`<upstream>-alpian.N`, so our builds never collide with an upstream release), `alpian-build.yml`, and this file. |
+| The feature | A `policyTag` connector config. When a Kafka Connect field schema carries a `PII` parameter, the generated BigQuery field gets that policy tag attached, enabling column-level access control. |
+| The infrastructure | The version marker (`<upstream>-alpian.N`, so our builds never collide with an upstream release), `alpian-build.yml`, and this file. |
 
 Only **three upstream files** are modified at all — the two Java files the
 feature needs, plus the poms for the version marker. Everything else the fork
@@ -266,11 +266,17 @@ gh run watch --repo alpian-swiss/bigquery-connector-for-apache-kafka
 
 ### 7. Tag the release
 
-The tag **must** match `v*-alpian*` or the release and publish jobs do not fire,
-and it should match the pom version exactly.
+Do this **last**, and only once step 6 is green. The tag **must** match
+`v*-alpian*` or the release and publish jobs do not fire, and it must match the
+pom version exactly — the workflow reads the version from the pom, so a
+mismatched tag produces a Release whose title disagrees with its contents.
 
 ```bash
-git tag v2.16.0-alpian.1
+# check both before tagging
+mvn -ntp -q --batch-mode org.apache.maven.plugins:maven-help-plugin:3.5.1:evaluate \
+  -Dexpression=project.version -DforceStdout   # must print 2.16.0-alpian.1
+
+git tag -a v2.16.0-alpian.1 -m "Alpian fork release 2.16.0-alpian.1"
 git push origin v2.16.0-alpian.1
 ```
 
@@ -278,6 +284,14 @@ That run additionally:
 
 1. creates a **GitHub Release** on `alpian-swiss` with both archives attached,
 2. runs the `publish` job, deploying the Maven artifacts to **GitHub Packages**.
+
+> **Once a release tag is pushed, stop rewriting the commits it points at.**
+> Until this point `Alpian` is force-pushed freely. A tag pins a specific commit
+> and that commit is now a published artifact: rewriting it strands the tag on
+> an unreachable commit, so the Release no longer corresponds to anything on the
+> branch. After tagging, add commits on top instead — and if you genuinely must
+> rewrite, delete and re-cut the tag as a new `-alpian.N+1` rather than moving
+> an existing one.
 
 ### 8. Get the jar
 
@@ -333,13 +347,33 @@ against the connector. Add the repository and a PAT with `read:packages` to
 </dependency>
 ```
 
-> **The `publish` job has never run.** GitHub Packages is documented to expect
-> the groupId to correspond to the repository owner, and ours is upstream's
-> `com.wepay.kcbq`. The deploy may be rejected. Treat the first tagged build as
-> the test: if Packages refuses the coordinates, either drop the `publish` job
-> and use the Release archive — which is the normal way to ship a Connect plugin
-> anyway — or relocate the groupId, which means a larger, more conflict-prone
-> pom patch. The Release path above does not depend on this working.
+**Verified working** as of `v2.15.0-alpian.1`. There was a documented concern
+that GitHub Packages requires the groupId to correspond to the repository owner,
+which would have rejected upstream's `com.wepay.kcbq`. It does not — the deploy
+succeeded and all three modules resolve:
+
+| Artifact | `.pom` | `.jar` |
+| --- | --- | --- |
+| `com.wepay.kcbq:kcbq-connector` | 200 | 200 |
+| `com.wepay.kcbq:kcbq-api` | 200 | 200 |
+| `com.wepay.kcbq:kcbq-parent` | 200 | n/a — `<packaging>pom</packaging>` |
+
+The published jar stamps `Implementation-Version: 2.15.0-alpian.1` in its
+manifest and contains both `BigQuerySchemaConverter` constructors, so the
+groupId does **not** need relocating. No pom patch required.
+
+To sanity-check the registry directly without a full Maven resolve — useful
+because a first transitive resolve pulls well over 150 MB of Google Cloud
+dependencies and is slow:
+
+```bash
+TOK=$(gh auth token)
+curl -sL -o /dev/null -w '%{http_code}\n' -u "x-access-token:$TOK" \
+  https://maven.pkg.github.com/alpian-swiss/bigquery-connector-for-apache-kafka/com/wepay/kcbq/kcbq-connector/2.16.0-alpian.1/kcbq-connector-2.16.0-alpian.1.jar
+```
+
+`x-access-token` works as the username with a `gh` token; a GitHub username with
+a `read:packages` PAT works too. Never commit either into a repo `settings.xml`.
 
 ### 9. Tidy up
 
